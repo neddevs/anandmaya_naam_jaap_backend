@@ -1,37 +1,11 @@
 const mongoose = require('mongoose');
 const sessionSchema = new mongoose.Schema({
-    divineName: {
-        type: String,
-        enum: ['Ram', 'Radha', 'Krishna', 'Shiva', 'Durga', 'Hanuman', 'Ganesh', 'Others'],
-        required: true
-    },
-    count: {
-        type: Number,
-        required: true,
-        default: 0
-    },
-    startTime: {
-        type: Date,
-        required:true
-    },
-
-    endTime: {
-        type: Date,
-        required: true,
-    },
-
-    // 4. Pure Date (Calculated for easier 90-day calendar filtering)
-    // We store this as YYYY-MM-DD so we don't have to deal with minutes/seconds when searching
-    sessionDate: {
-        type: Date,
-        required: true,
-        index: true // index makes searching by date much faster
-    }
-}, {
-    timestamps: true // This automatically adds 'createdAt' and 'updatedAt' fields
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    divineName: { type: String, required: true },
+    count: { type: Number, required: true },
+    duration: { type: Number, required: true }, // in seconds
+    startTime: { type: Date, required: true },
+    endTime: { type: Date, required: true },
+    sessionDate: { type: Date, required: true, index: true }
 });
-
-// Create the Model
-const Session = mongoose.model('Session', sessionSchema);
-
-module.exports = Session;
+module.exports = mongoose.model('Session', sessionSchema);

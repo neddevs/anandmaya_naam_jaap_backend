@@ -1,62 +1,87 @@
 const express = require('express');
 const router = express.Router();
-const Session = require('../models/Session'); // Import our Schema
+const Session = require('../models/Session');
+const { protect } = require('../middleware/authMiddleware');
 
-// 1. SAVE A NEW SESSION
-// This runs when the user clicks "STOP"
-router.post('/save', async (req, res) => {
+// 1. SAVE A SESSION (POST /api/sessions/save)
+router.post('/save', protect, async (req, res) => {
     try {
-        const { divineName, count, startTime, endTime } = req.body;
+        const { divineName, count, duration, startTime, endTime } = req.body;
 
-        // Logic: Extract just the Date (YYYY-MM-DD) from startTime
-        // This makes searching by calendar date MUCH easier later.
+        // We calculate the pure date for the calendar/stats logic
         const sessionDate = new Date(startTime);
         sessionDate.setHours(0, 0, 0, 0);
 
-        const newSession = new Session({
+        const session = await Session.create({
+            userId: req.user._id, // Taken from the "Protect" middleware
             divineName,
             count,
+            duration,
             startTime,
             endTime,
             sessionDate
         });
-
-        await newSession.save();
-        res.status(201).json({ message: "Session saved successfully!", data: newSession });
-    } catch (error) {
-        res.status(500).json({ message: "Error saving session", error: error.message });
+        res.status(201).json(session);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
     }
 });
 
-// 2. GET SESSIONS FROM LAST 90 DAYS
-router.get('/history', async (req, res) => {
+// 2. GET ADVANCED STATS (GET /api/sessions/stats)
+// This handles the 7, 30, 90, and 365 day logic
+router.get('/stats', protect, async (req, res) => {
+    const days = parseInt(req.query.days) || 30; // Default to 30 if not specified
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
     try {
-        const ninetyDaysAgo = new Date();
-        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+        // MongoDB Aggregation: This is the "Math Brain"
+        const stats = await Session.aggregate([
+            {
+                $match: {
+                    userId: req.user._id,
+                    sessionDate: { $gte: startDate }
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalChants: { $sum: "$count" },
+                    sessions: { $count: {} },
+                    totalTime: { $sum: "$duration" },
+                    avg: { $avg: "$count" }
+                }
+            }
+        ]);
 
-        // Find sessions where sessionDate is Greater Than or Equal (gte) to 90 days ago
-        const sessions = await Session.find({
-            sessionDate: { $gte: ninetyDaysAgo }
-        }).sort({ startTime: -1 }); // Show newest first
-
-        res.status(200).json(sessions);
-    } catch (error) {
-        res.status(500).json({ message: "Error fetching history", error: error.message });
+        // If no sessions found, return zeros instead of an empty error
+        res.json(stats[0] || { totalChants: 0, sessions: 0, totalTime: 0, avg: 0 });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
     }
 });
 
-// 3. GET STATS FOR A SPECIFIC DATE
-// The frontend will send a date like "2023-10-25"
-router.get('/stats/:date', async (req, res) => {
+// Calendar access
+router.get('/daily-stats', protect, async (req, res) => {
+    const { date } = req.query; // Expects YYYY-MM-DD
+    const searchDate = new Date(date);
+    searchDate.setHours(0, 0, 0, 0);
+
     try {
-        const requestedDate = new Date(req.params.date);
-        requestedDate.setHours(0, 0, 0, 0);
-
-        const dailySessions = await Session.find({ sessionDate: requestedDate });
-        res.status(200).json(dailySessions);
-    } catch (error) {
-        res.status(500).json({ message: "Error fetching daily stats", error: error.message });
-    }
+        const stats = await Session.aggregate([
+            { $match: { userId: req.user._id, sessionDate: searchDate } },
+            {
+                $group: {
+                    _id: null,
+                    totalChants: { $sum: "$count" },
+                    sessions: { $count: {} },
+                    avg: { $avg: "$count" }
+                }
+            }
+        ]);
+        res.json(stats[0] || { totalChants: 0, sessions: 0, avg: 0 });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
 
 module.exports = router;
